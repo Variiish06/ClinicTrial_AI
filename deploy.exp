@@ -1,0 +1,15 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn scp flaskui/rpi_pager.py pi_setup.sh pi@nand.local:~
+expect {
+    "yes/no" { send "yes\r"; exp_continue }
+    "password:" { send "toor\r" }
+}
+expect eof
+
+spawn ssh pi@nand.local "chmod +x pi_setup.sh && ./pi_setup.sh"
+expect {
+    "yes/no" { send "yes\r"; exp_continue }
+    "password:" { send "toor\r" }
+}
+expect eof
