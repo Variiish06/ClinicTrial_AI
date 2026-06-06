@@ -1,0 +1,8 @@
+Test cohort loaded: 9803 patients
+Could not compute high risk indices: 'NoneType' object has no attribute 'predict_proba'
+[MQTT] paho-mqtt not installed, skipping fleet listener.
+ * Serving Flask app 'app'
+ * Debug mode: on
+Test cohort loaded: 9803 patients
+Could not compute high risk indices: 'NoneType' object has no attribute 'predict_proba'
+[MQTT] paho-mqtt not installed, skipping fleet listener.

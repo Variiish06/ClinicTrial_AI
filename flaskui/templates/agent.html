@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark" id="htmlRoot">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeliriumWatch — Clinical Agent</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ═══ NAVBAR ═══ -->
+<nav class="navbar-dw">
+  <div class="container-fluid d-flex align-items-center px-3">
+    <div class="d-flex align-items-center gap-3">
+      <div class="nav-logo"><i class="fa-solid fa-brain"></i></div>
+      <div>
+        <div class="nav-title">DeliriumWatch</div>
+        <div class="nav-subtitle">Temporal Early Warning CDSS • MIMIC-IV</div>
+      </div>
+      <span class="badge-live ms-3"><i class="fa-solid fa-circle-dot me-1"></i>LIVE</span>
+    </div>
+    <div class="d-flex align-items-center gap-3 ms-auto">
+      <div class="nav-stat"><i class="fa-solid fa-database me-1"></i>25,843 stays</div>
+      <div class="nav-stat"><i class="fa-solid fa-chart-line me-1"></i>AUROC 0.8511</div>
+      <a class="nav-link text-light fw-600 small px-2" href="/">
+        <i class="fa-solid fa-stethoscope me-1"></i>Assessment
+      </a>
+      <a class="nav-link text-info fw-600 small px-2" href="/agent">
+        <i class="fa-solid fa-robot me-1"></i>Agent
+      </a>
+      <button class="btn btn-sm btn-outline-light border-0 px-2" id="themeToggle" title="Toggle theme">
+        <i class="fa-solid fa-sun"></i>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<div class="container-fluid px-3 py-4">
+
+  <!-- ─── SECTION 1: HEADER ─── -->
+  <div class="mb-4">
+    <h1 class="fw-800 mb-1" style="font-size:1.6rem;color:var(--dw-text);">
+      <i class="fa-solid fa-robot me-2" style="color:var(--dw-primary)"></i>DeliriumWatch Clinical Agent
+    </h1>
+    <p class="mb-0" style="color:var(--dw-text-muted);font-size:0.82rem;font-weight:500;">
+      4-step agentic pipeline: <span style="color:var(--dw-primary)">Risk</span> →
+      <span style="color:var(--dw-accent)">Explain</span> →
+      <span style="color:var(--dw-med)">Intervene</span> →
+      <span style="color:var(--dw-low)">Alert</span>
+    </p>
+  </div>
+
+  <!-- ─── SECTION 2: PATIENT SELECTOR ─── -->
+  <div class="card-glass mb-4">
+    <div class="card-glass-header">
+      <span><i class="fa-solid fa-user-injured me-2"></i>Patient Selector</span>
+    </div>
+    <div class="card-glass-body">
+      <div class="row g-3 align-items-end">
+
+        <!-- Dropdown -->
+        <div class="col-md-5">
+          <label class="form-label-sm">High-Risk Patients (&gt;70% predicted)</label>
+          <select class="form-select form-select-sm input-glass" id="patientDropdown">
+            {% for idx in high_risk_indices[:50] %}
+            <option value="{{ idx }}">Patient {{ idx }} — HIGH RISK &#x26A0;&#xFE0F;</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Manual input -->
+        <div class="col-md-4">
+          <label class="form-label-sm">Or enter any patient index (0 – 9802)</label>
+          <input type="number" class="form-control form-control-sm input-glass"
+                 id="patientManual" min="0" max="9802" placeholder="e.g. 42">
+        </div>
+
+        <!-- Run button -->
+        <div class="col-md-3">
+          <button class="btn btn-primary w-100 fw-700 py-2 btn-glow" id="runBtn" onclick="runAgent()">
+            <i class="fa-solid fa-play me-2"></i>Run Agent
+          </button>
+        </div>
+      </div>
+
+      <!-- Error alert (hidden by default) -->
+      <div id="errorAlert" class="alert mt-3 mb-0 d-none"
+           style="background:var(--dw-high-bg);border:1px solid rgba(239,68,68,0.3);color:var(--dw-high);border-radius:10px;">
+        <i class="fa-solid fa-circle-exclamation me-2"></i><span id="errorMsg"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── SECTION 3: PIPELINE STEP CARDS ─── -->
+  <div class="row g-3">
+
+    <!-- CARD 1: Risk Assessment -->
+    <div class="col-md-6" id="card1" style="display:none">
+      <div class="card-glass h-100">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-gauge-high me-2"></i>Step 1: Risk Assessment</span>
+          <span class="badge bg-secondary fw-700">1/4</span>
+        </div>
+        <div class="card-glass-body text-center py-4">
+          <div id="riskScore" class="fw-800 mb-2" style="font-size:3rem;line-height:1;">—</div>
+          <div class="mb-3">
+            <span id="riskBadge" class="risk-badge-lg">—</span>
+          </div>
+          <div style="font-size:0.78rem;color:var(--dw-text-muted);">
+            <i class="fa-solid fa-tag me-1"></i>Actual outcome:
+            <span id="actualOutcome" class="fw-700 ms-1">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CARD 2: SHAP Explanation -->
+    <div class="col-md-6" id="card2" style="display:none">
+      <div class="card-glass h-100">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-scale-balanced me-2"></i>Step 2: SHAP Explanation</span>
+          <span class="badge bg-secondary fw-700">2/4</span>
+        </div>
+        <div class="card-glass-body">
+          <div class="row g-3">
+            <div class="col-6">
+              <div class="section-label text-danger mb-2">
+                <i class="fa-solid fa-arrow-trend-up me-1"></i>Risk Factors &#x2191;
+              </div>
+              <div id="riskFactors"></div>
+            </div>
+            <div class="col-6">
+              <div class="section-label text-success mb-2">
+                <i class="fa-solid fa-arrow-trend-down me-1"></i>Protective Factors &#x2193;
+              </div>
+              <div id="protectiveFactors"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CARD 3: Interventions -->
+    <div class="col-md-6" id="card3" style="display:none">
+      <div class="card-glass h-100">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-list-check me-2"></i>Step 3: Interventions</span>
+          <span class="badge bg-secondary fw-700">3/4</span>
+        </div>
+        <div class="card-glass-body">
+          <div id="interventionsList"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CARD 4: Clinical Alert -->
+    <div class="col-md-6" id="card4" style="display:none">
+      <div class="card-glass h-100">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-bell me-2"></i>Step 4: Clinical Alert</span>
+          <span class="badge bg-secondary fw-700">4/4</span>
+        </div>
+        <div class="card-glass-body">
+          <div id="pagerBadge" class="mb-3 d-none">
+            <span class="badge fw-700 px-3 py-2"
+                  style="background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:0.78rem;">
+              <i class="fa-solid fa-bell me-1"></i>Pager alert sent to Bay A
+            </span>
+          </div>
+          <pre id="alertText"
+               style="background:rgba(255,255,255,0.03);border:1px solid var(--dw-glass-border);
+                      border-radius:10px;padding:1rem;font-size:0.82rem;white-space:pre-wrap;
+                      color:var(--dw-text);font-family:'Inter',-apple-system,sans-serif;
+                      margin:0;line-height:1.6;"></pre>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /row -->
+</div><!-- /container -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // ─── Theme toggle (matches index.html behaviour) ───────────────
+  const htmlRoot = document.getElementById('htmlRoot');
+  const themeBtn = document.getElementById('themeToggle');
+  const savedTheme = localStorage.getItem('dw-theme') || 'dark';
+  htmlRoot.setAttribute('data-bs-theme', savedTheme);
+  themeBtn.innerHTML = savedTheme === 'dark'
+    ? '<i class="fa-solid fa-sun"></i>'
+    : '<i class="fa-solid fa-moon"></i>';
+  themeBtn.addEventListener('click', () => {
+    const next = htmlRoot.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+    htmlRoot.setAttribute('data-bs-theme', next);
+    localStorage.setItem('dw-theme', next);
+    themeBtn.innerHTML = next === 'dark'
+      ? '<i class="fa-solid fa-sun"></i>'
+      : '<i class="fa-solid fa-moon"></i>';
+  });
+
+  // ─── Helpers ───────────────────────────────────────────────────
+  function showCard(id) {
+    const el = document.getElementById(id);
+    el.style.display = '';
+    el.style.opacity = '0';
+    el.style.transition = 'opacity 0.35s ease';
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+  }
+
+  function buildShapBar(feat, shap, colorClass) {
+    const barW = Math.min(Math.abs(shap) * 600, 100).toFixed(1);
+    return `
+      <div class="mb-3">
+        <div class="fw-700 mb-1" style="font-size:0.8rem">${feat}</div>
+        <div class="progress mb-1" style="height:6px;background:rgba(255,255,255,0.07);border-radius:4px">
+          <div class="progress-bar bg-${colorClass}" style="width:${barW}%;border-radius:4px"></div>
+        </div>
+        <div style="font-size:0.68rem;color:var(--dw-text-muted)">${shap > 0 ? '+' : ''}${shap.toFixed(4)}</div>
+      </div>`;
+  }
+
+  // ─── Main agent function ────────────────────────────────────────
+  async function runAgent() {
+    // Hide previous results and error
+    ['card1','card2','card3','card4'].forEach(id => {
+      document.getElementById(id).style.display = 'none';
+    });
+    document.getElementById('errorAlert').classList.add('d-none');
+
+    // Determine patient index — manual input takes priority
+    const manual = document.getElementById('patientManual').value.trim();
+    const dropdown = document.getElementById('patientDropdown').value;
+    const rawIdx = manual !== '' ? manual : dropdown;
+    const patientIdx = parseInt(rawIdx, 10);
+
+    if (isNaN(patientIdx) || patientIdx < 0 || patientIdx > 9802) {
+      document.getElementById('errorMsg').textContent = 'Please enter a valid patient index (0–9802).';
+      document.getElementById('errorAlert').classList.remove('d-none');
+      return;
+    }
+
+    // Loading state
+    const btn = document.getElementById('runBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running pipeline…';
+
+    try {
+      const res = await fetch('/api/agent/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patient_idx: patientIdx })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      // ── Card 1: Risk ──────────────────────────────────────────
+      setTimeout(() => {
+        const level = data.risk_result.risk_level;
+        const levelLower = level.toLowerCase();
+        const classMap = { HIGH: 'danger', MEDIUM: 'warning', LOW: 'success' };
+        const iconMap  = { HIGH: 'skull', MEDIUM: 'triangle-exclamation', LOW: 'shield-check' };
+        const labelMap = { HIGH: 'CRITICAL', MEDIUM: 'ELEVATED', LOW: 'NORMAL' };
+
+        document.getElementById('riskScore').textContent = data.risk_result.risk_percentage;
+        document.getElementById('riskScore').style.color =
+          level === 'HIGH' ? 'var(--dw-high)' :
+          level === 'MEDIUM' ? 'var(--dw-med)' : 'var(--dw-low)';
+
+        document.getElementById('riskBadge').className = `risk-badge-lg risk-${levelLower}`;
+        document.getElementById('riskBadge').innerHTML =
+          `<i class="fa-solid fa-${iconMap[level]} me-1"></i>${labelMap[level]}`;
+
+        const actual = data.actual_label === 1 ? 'DELIRIUM' : 'NO DELIRIUM';
+        const actualColor = data.actual_label === 1 ? 'var(--dw-high)' : 'var(--dw-low)';
+        document.getElementById('actualOutcome').textContent = actual;
+        document.getElementById('actualOutcome').style.color = actualColor;
+
+        showCard('card1');
+      }, 0);
+
+      // ── Card 2: SHAP ──────────────────────────────────────────
+      setTimeout(() => {
+        const risks = data.shap_explanation.top_risk_factors.slice(0, 3);
+        const prots = data.shap_explanation.top_protective_factors.slice(0, 3);
+
+        document.getElementById('riskFactors').innerHTML =
+          risks.map(a => buildShapBar(a.feature, a.value, 'danger')).join('');
+        document.getElementById('protectiveFactors').innerHTML =
+          prots.map(a => buildShapBar(a.feature, a.value, 'success')).join('');
+
+        showCard('card2');
+      }, 400);
+
+      // ── Card 3: Interventions ─────────────────────────────────
+      setTimeout(() => {
+        const actions = data.interventions.actionable_interventions;
+        let html = '';
+        if (actions.length > 0) {
+          html = '<ol class="ps-3 mb-0">' + actions.map(a => `
+            <li class="mb-3">
+              <strong style="font-size:0.82rem;text-transform:uppercase;letter-spacing:0.3px">
+                ${a.feature}
+              </strong>
+              <div style="color:var(--dw-text-muted);font-size:0.78rem;margin-top:2px">
+                ${a.action}
+              </div>
+            </li>`).join('') + '</ol>';
+        } else {
+          html = `
+            <div class="text-center py-3">
+              <i class="fa-solid fa-lock fs-3 d-block mb-2" style="color:var(--dw-text-muted);opacity:0.5"></i>
+              <span style="color:var(--dw-text-muted);font-size:0.82rem">
+                Risk driven by non-modifiable factors —<br>heightened monitoring recommended
+              </span>
+            </div>`;
+        }
+        document.getElementById('interventionsList').innerHTML = html;
+        showCard('card3');
+      }, 800);
+
+      // ── Card 4: Alert ─────────────────────────────────────────
+      setTimeout(() => {
+        document.getElementById('alertText').textContent = data.alert_text;
+
+        const pagerBadge = document.getElementById('pagerBadge');
+        if (data.risk_result.risk_level === 'HIGH') {
+          pagerBadge.classList.remove('d-none');
+        } else {
+          pagerBadge.classList.add('d-none');
+        }
+
+        showCard('card4');
+
+        // Re-enable button
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-play me-2"></i>Run Agent';
+      }, 1200);
+
+    } catch (err) {
+      document.getElementById('errorMsg').textContent = err.message;
+      document.getElementById('errorAlert').classList.remove('d-none');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-play me-2"></i>Run Agent';
+    }
+  }
+</script>
+</body>
+</html>

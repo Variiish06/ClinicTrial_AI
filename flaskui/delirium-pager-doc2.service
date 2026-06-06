@@ -1,0 +1,17 @@
+[Unit]
+Description=DeliriumWatch MQTT e-Ink Pager (Doc 2)
+After=network.target
+
+[Service]
+Type=simple
+User=kunchu1
+Environment="PAGER_ID=doc2"
+Environment="PAGER_ZONE=Bay B"
+Environment="MQTT_BROKER=172.20.10.5"
+ExecStart=/usr/bin/python3 /home/kunchu1/rpi_pager.py
+WorkingDirectory=/home/kunchu1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

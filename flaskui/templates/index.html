@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark" id="htmlRoot">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeliriumWatch — ICU Delirium CDSS</title>
+  <meta name="description" content="Clinical Decision Support System for ICU Delirium prediction using XGBoost and NID biomarker">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ═══ NAVBAR ═══ -->
+<nav class="navbar-dw">
+  <div class="container-fluid d-flex align-items-center px-3">
+    <div class="d-flex align-items-center gap-3">
+      <div class="nav-logo"><i class="fa-solid fa-brain"></i></div>
+      <div>
+        <div class="nav-title">DeliriumWatch</div>
+        <div class="nav-subtitle">Temporal Early Warning CDSS • MIMIC-IV</div>
+      </div>
+      <span class="badge-live ms-3"><i class="fa-solid fa-circle-dot me-1"></i>LIVE</span>
+    </div>
+    <div class="d-flex align-items-center gap-3 ms-auto">
+      <div class="nav-stat"><i class="fa-solid fa-database me-1"></i>25,843 stays</div>
+      <div class="nav-stat"><i class="fa-solid fa-chart-line me-1"></i>AUROC 0.8511</div>
+      <a class="nav-link text-light fw-600 small px-2" href="/agent">🤖 Agent</a>
+      <button class="btn btn-sm btn-outline-light border-0 px-2" id="themeToggle" title="Toggle theme">
+        <i class="fa-solid fa-sun"></i>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ RISK SUMMARY BAR ═══ -->
+<div class="summary-bar">
+  <div class="container-fluid d-flex align-items-center px-3 gap-4">
+    <span class="summary-label"><i class="fa-solid fa-bed-pulse me-1"></i>Ward Census</span>
+    <span class="pill pill-high"><i class="fa-solid fa-skull me-1"></i>{{ risk_summary.high }} HIGH</span>
+    <span class="pill pill-med"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ risk_summary.medium }} MEDIUM</span>
+    <span class="pill pill-low"><i class="fa-solid fa-check me-1"></i>{{ risk_summary.low }} LOW</span>
+    <span class="pill pill-total">{{ risk_summary.total }} Total</span>
+    <div class="ms-auto d-flex gap-2">
+      <form method="post" action="/clear" class="m-0">
+        <button type="submit" class="btn btn-sm btn-outline-danger border-0 fw-600" onclick="return confirm('Clear all patients?')">
+          <i class="fa-solid fa-trash me-1"></i>Clear Ward
+        </button>
+      </form>
+      <button class="btn btn-sm btn-outline-light border-0 fw-600" onclick="window.print()">
+        <i class="fa-solid fa-print me-1"></i>Export
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<div class="container-fluid px-3 py-3">
+  <div class="row g-3">
+
+    <!-- ╔═══ LEFT COLUMN: FORM + ROSTER ═══╗ -->
+    <div class="col-lg-4 col-xl-3">
+
+      <!-- PATIENT ASSESSMENT FORM -->
+      <div class="card-glass">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-stethoscope me-2"></i>Patient Assessment</span>
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-info border-0 fw-600 dropdown-toggle" data-bs-toggle="dropdown">
+              <i class="fa-solid fa-wand-magic-sparkles me-1"></i>Presets
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark">
+              <li><a class="dropdown-item" href="#" onclick="loadPreset('high_septic')"><i class="fa-solid fa-skull text-danger me-2"></i>High-Risk Septic</a></li>
+              <li><a class="dropdown-item" href="#" onclick="loadPreset('medium_postsurg')"><i class="fa-solid fa-triangle-exclamation text-warning me-2"></i>Post-Surgical</a></li>
+              <li><a class="dropdown-item" href="#" onclick="loadPreset('low_stable')"><i class="fa-solid fa-check text-success me-2"></i>Stable Cardiac</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="card-glass-body">
+          <form method="post" id="assessForm">
+            <!-- Patient Identity -->
+            <div class="section-label"><i class="fa-solid fa-id-card me-1"></i>Patient Identity</div>
+            <div class="row g-2 mb-3">
+              <div class="col-7">
+                <label class="form-label-sm">Patient Name</label>
+                <input type="text" class="form-control form-control-sm input-glass" name="patient_name" value="{{ patient_name }}" placeholder="LAST, FIRST" id="inp_name">
+              </div>
+              <div class="col-5">
+                <label class="form-label-sm">Bed</label>
+                <input type="text" class="form-control form-control-sm input-glass" name="patient_bed" value="{{ patient_bed }}" placeholder="MICU-A-01" id="inp_bed">
+              </div>
+              <div class="col-6">
+                <label class="form-label-sm">Zone</label>
+                <select class="form-select form-select-sm input-glass" name="patient_zone" id="inp_zone">
+                  {% for z in zone_options %}<option value="{{ z }}" {% if z == patient_zone %}selected{% endif %}>{{ z }}</option>{% endfor %}
+                </select>
+              </div>
+              <div class="col-6">
+                <label class="form-label-sm">Gender</label>
+                <select class="form-select form-select-sm input-glass" name="gender_select" id="inp_gender">
+                  <option value="Male" {% if gender_select == 'Male' %}selected{% endif %}>Male</option>
+                  <option value="Female" {% if gender_select == 'Female' %}selected{% endif %}>Female</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Demographics -->
+            <div class="section-label"><i class="fa-solid fa-user-doctor me-1"></i>Demographics & Acuity</div>
+            <div class="row g-2 mb-3">
+              <div class="col-4">
+                <label class="form-label-sm">Age</label>
+                <input type="number" step="1" class="form-control form-control-sm input-glass" name="age" value="{{ values['age'] }}" id="inp_age">
+              </div>
+              <div class="col-4">
+                <label class="form-label-sm">Avg SOFA</label>
+                <input type="number" step="0.1" class="form-control form-control-sm input-glass" name="avg_sofa" value="{{ values['avg_sofa'] }}" id="inp_sofa">
+              </div>
+              <div class="col-4">
+                <label class="form-label-sm">ICU Unit</label>
+                <select class="form-select form-select-sm input-glass" name="icu_select" id="inp_icu">
+                  {% for icu in icu_options %}<option value="{{ icu }}" {% if icu == icu_sel %}selected{% endif %}>{{ icu[:12] }}</option>{% endfor %}
+                </select>
+              </div>
+            </div>
+
+            <!-- Vitals -->
+            <div class="section-label"><i class="fa-solid fa-heart-pulse me-1"></i>Hemodynamics (24h)</div>
+            <div class="row g-2 mb-3">
+              <div class="col-4"><label class="form-label-sm">HR Mean</label><input type="number" step="0.1" class="form-control form-control-sm input-glass" name="hr_mean" value="{{ values['hr_mean'] }}" id="inp_hr"></div>
+              <div class="col-4"><label class="form-label-sm">RR Mean</label><input type="number" step="0.1" class="form-control form-control-sm input-glass" name="rr_mean" value="{{ values['rr_mean'] }}" id="inp_rr"></div>
+              <div class="col-4"><label class="form-label-sm">MAP</label><input type="number" step="0.1" class="form-control form-control-sm input-glass" name="nibp_mean" value="{{ values['nibp_mean'] }}" id="inp_map"></div>
+              <div class="col-4"><label class="form-label-sm">SpO₂ Min</label><input type="number" step="0.1" class="form-control form-control-sm input-glass text-danger fw-bold" name="spo2_min" value="{{ values['spo2_min'] }}" id="inp_spo2"></div>
+              <div class="col-4"><label class="form-label-sm">SpO₂ Mean</label><input type="number" step="0.1" class="form-control form-control-sm input-glass" name="spo2_mean" value="{{ values['spo2_mean'] }}" id="inp_spo2m"></div>
+              <div class="col-4"><label class="form-label-sm">A-Line</label>
+                <select class="form-select form-select-sm input-glass" name="abp_measured" id="inp_abp"><option value="1" {% if values['abp_measured']==1 %}selected{% endif %}>Yes</option><option value="0" {% if values['abp_measured']==0 %}selected{% endif %}>No</option></select>
+              </div>
+            </div>
+            <!-- Hidden variability fields -->
+            <input type="hidden" name="hr_std" value="{{ values['hr_std'] }}">
+            <input type="hidden" name="rr_std" value="{{ values['rr_std'] }}">
+            <input type="hidden" name="admission_sofa" value="{{ values['admission_sofa'] }}">
+            <input type="hidden" name="unique_sedation_drugs" value="{{ values['unique_sedation_drugs'] }}">
+
+            <!-- Sedation -->
+            <div class="section-label"><i class="fa-solid fa-pills me-1"></i>Sedation (24h Cumulative)</div>
+            <div class="row g-2 mb-3">
+              <div class="col-3"><label class="form-label-sm">Propofol</label><input type="number" step="1" class="form-control form-control-sm input-glass" name="propofol_total" value="{{ values['propofol_total'] }}" id="inp_prop"></div>
+              <div class="col-3"><label class="form-label-sm">Fentanyl</label><input type="number" step="1" class="form-control form-control-sm input-glass" name="fentanyl_total" value="{{ values['fentanyl_total'] }}" id="inp_fent"></div>
+              <div class="col-3"><label class="form-label-sm">Midaz</label><input type="number" step="0.1" class="form-control form-control-sm input-glass" name="midazolam_total" value="{{ values['midazolam_total'] }}" id="inp_midaz"></div>
+              <div class="col-3"><label class="form-label-sm">Lorazep</label><input type="number" step="0.1" class="form-control form-control-sm input-glass" name="lorazepam_total" value="{{ values['lorazepam_total'] }}" id="inp_loraz"></div>
+            </div>
+
+            <!-- NID Biomarker -->
+            <div class="nid-card">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="fw-700"><i class="fa-solid fa-moon me-1"></i>NID Biomarker</span>
+                <span class="badge bg-primary">SHAP Rank #1</span>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <input type="range" class="form-range flex-grow-1" min="0" max="1" step="0.01" name="nid_score" value="{{ values['nid_score'] }}" oninput="document.getElementById('nidVal').innerText=this.value" id="inp_nid">
+                <span class="nid-value" id="nidVal">{{ values['nid_score'] }}</span>
+              </div>
+              <div class="text-muted mt-1" style="font-size:0.65rem">NIGHTTIME EVENTS (22h-06h) / TOTAL EVENTS</div>
+            </div>
+
+            <input type="hidden" name="model_select" value="ensemble">
+            <button type="submit" class="btn btn-primary w-100 fw-700 py-2 mt-3 btn-glow" id="assessBtn">
+              <i class="fa-solid fa-microchip me-2"></i>Run Inference
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- WARD ROSTER -->
+      <div class="card-glass mt-3">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-bed-pulse me-2"></i>Ward Roster</span>
+          <span class="badge bg-secondary">{{ ward_patients|length }}</span>
+        </div>
+        <div class="card-glass-body p-0" style="max-height:280px;overflow-y:auto">
+          {% if ward_patients %}
+          <table class="table table-sm table-dark table-hover mb-0 roster-table">
+            <thead><tr><th>Patient</th><th>Bed</th><th>Risk</th><th>Time</th></tr></thead>
+            <tbody>
+              {% for p in ward_patients %}
+              <tr class="roster-row {% if p.label == 'HIGH' %}row-high{% elif p.label == 'MEDIUM' %}row-med{% endif %}" onclick="loadPatient({{ p|tojson }})">
+                <td class="fw-600">{{ p.name[:16] }}</td>
+                <td><small>{{ p.bed }}</small></td>
+                <td>
+                  <span class="risk-pill risk-{{ p.label|lower }}">
+                    {% if p.label == 'HIGH' %}<i class="fa-solid fa-skull me-1"></i>{% elif p.label == 'MEDIUM' %}<i class="fa-solid fa-exclamation me-1"></i>{% else %}<i class="fa-solid fa-check me-1"></i>{% endif %}
+                    {{ p.risk_pct }}
+                  </span>
+                </td>
+                <td><small class="text-muted">{{ p.timestamp }}</small></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <div class="text-center text-muted py-4"><i class="fa-solid fa-inbox fs-3 d-block mb-2 opacity-50"></i>No patients assessed</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- PAGER FLEET -->
+      <div class="card-glass mt-3">
+        <div class="card-glass-header">
+          <span><i class="fa-solid fa-tower-broadcast me-2"></i>Pager Fleet</span>
+        </div>
+        <div class="card-glass-body p-2">
+          {% if pager_fleet %}
+            {% for pid, info in pager_fleet.items() %}
+            <div class="pager-unit {% if info.online %}pager-online{% else %}pager-offline{% endif %}">
+              <div class="d-flex align-items-center gap-2">
+                <i class="fa-solid fa-circle {% if info.online %}text-success{% else %}text-danger{% endif %}" style="font-size:8px"></i>
+                <span class="fw-700">{{ pid }}</span>
+                <span class="text-muted small">{{ info.zone }}</span>
+              </div>
+              <div class="signal-bars">
+                {% set rssi = info.get('rssi', -100) %}
+                <div class="bar {% if rssi > -80 %}active{% endif %}"></div>
+                <div class="bar {% if rssi > -65 %}active{% endif %}"></div>
+                <div class="bar {% if rssi > -50 %}active{% endif %}"></div>
+                <div class="bar {% if rssi > -35 %}active{% endif %}"></div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-center text-muted py-3 small"><i class="fa-solid fa-satellite-dish me-1"></i>Waiting for pager heartbeats...</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ╔═══ RIGHT COLUMN: RESULTS ═══╗ -->
+    <div class="col-lg-8 col-xl-9">
+
+      <!-- TELEMETRY -->
+      <div class="card-glass telemetry-card mb-3">
+        <div class="d-flex justify-content-between align-items-center px-3 py-2">
+          <span class="fw-700 text-info small"><i class="fa-solid fa-satellite-dish me-2"></i>Real-Time Telemetry (ECG/EEG Vector)</span>
+          <span class="badge-live-sm"><i class="fa-solid fa-wifi me-1"></i>MONITORING</span>
+        </div>
+        <canvas id="telemetryCanvas" style="width:100%;height:100px;display:block"></canvas>
+      </div>
+
+      <!-- RISK RESULT + TREND -->
+      <div class="row g-3 mb-3">
+        <!-- Risk Gauge -->
+        <div class="col-md-5">
+          <div class="card-glass h-100">
+            <div class="card-glass-body text-center py-4">
+              {% if prob is not none %}
+              <div class="gauge-container">
+                <svg viewBox="0 0 200 120" class="gauge-svg">
+                  <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="12" stroke-linecap="round"/>
+                  <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none"
+                    stroke="{% if label == 'HIGH' %}#ef4444{% elif label == 'MEDIUM' %}#f59e0b{% else %}#22c55e{% endif %}"
+                    stroke-width="12" stroke-linecap="round"
+                    stroke-dasharray="{{ (prob * 251)|int }} 251"
+                    class="gauge-fill"/>
+                </svg>
+                <div class="gauge-value {% if label == 'HIGH' %}text-danger{% elif label == 'MEDIUM' %}text-warning{% else %}text-success{% endif %}">
+                  {{ '%.1f'|format(prob*100) }}%
+                </div>
+                <div class="gauge-label">Delirium Risk</div>
+              </div>
+              <div class="mt-3">
+                <span class="risk-badge-lg risk-{{ label|lower }}">
+                  {% if label == 'HIGH' %}<i class="fa-solid fa-skull me-1"></i>CRITICAL{% elif label == 'MEDIUM' %}<i class="fa-solid fa-triangle-exclamation me-1"></i>ELEVATED{% else %}<i class="fa-solid fa-shield-check me-1"></i>NORMAL{% endif %}
+                </span>
+              </div>
+              {% if dispatch_status %}
+              <div class="mt-2"><span class="badge bg-info bg-opacity-25 text-info"><i class="fa-solid fa-tower-broadcast me-1"></i>Paged: {{ dispatch_status }}</span></div>
+              {% endif %}
+              {% else %}
+              <div class="text-muted py-5"><i class="fa-solid fa-arrow-left me-2 opacity-50"></i>Submit patient data to begin</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Model Comparison + Trend -->
+        <div class="col-md-7">
+          <div class="card-glass h-100">
+            <div class="card-glass-header"><span><i class="fa-solid fa-chart-line me-2"></i>Model Comparison & Trend</span></div>
+            <div class="card-glass-body">
+              {% if prob is not none %}
+              <!-- Model cards -->
+              <div class="row g-2 mb-3">
+                {% for mname, mprob in all_probs.items() %}
+                <div class="col-4">
+                  <div class="model-card {% if mname == selected_model %}model-active{% endif %}">
+                    <div class="model-name">{{ mname|upper }}</div>
+                    <div class="model-score {% if risk_label is defined %}{% endif %}">
+                      {% if mprob == mprob %}{{ '%.1f'|format(mprob*100) }}%{% else %}N/A{% endif %}
+                    </div>
+                    <div class="model-auroc">AUROC {{ aurocs.get(mname, 'N/A') }}</div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+              <div style="height:180px"><canvas id="trendChart"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SHAP + ORDERS -->
+      <div class="row g-3 mb-3">
+        <!-- SHAP -->
+        <div class="col-lg-7">
+          <div class="card-glass h-100">
+            <div class="card-glass-header">
+              <span><i class="fa-solid fa-scale-balanced me-2"></i>Explainable AI — SHAP Analysis</span>
+              <small class="text-muted" style="text-transform:none">Log-Odds Shift</small>
+            </div>
+            <div class="card-glass-body">
+              {% if shap_available %}
+              <div style="height:240px"><canvas id="shapChart"></canvas></div>
+              {% else %}
+              <div class="text-center text-muted py-5"><i class="fa-solid fa-chart-bar fs-1 d-block mb-2 opacity-25"></i>SHAP computes post-inference</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- Clinical Orders -->
+        <div class="col-lg-5">
+          <div class="card-glass h-100">
+            <div class="card-glass-header"><span><i class="fa-solid fa-list-check me-2"></i>Clinical Orders</span></div>
+            <div class="card-glass-body p-0">
+              {% if label == 'HIGH' or label == 'MEDIUM' %}
+              <div class="order-list">
+                <label class="order-item"><input type="checkbox" class="form-check-input me-2"> Initiate CAM-ICU assessment q4h</label>
+                <label class="order-item"><input type="checkbox" class="form-check-input me-2"> Cluster nursing care to night blocks</label>
+                <label class="order-item"><input type="checkbox" class="form-check-input me-2"> Daily SAT/SBT protocol check</label>
+                <label class="order-item"><input type="checkbox" class="form-check-input me-2"> Dim lights + eye mask protocol</label>
+                <label class="order-item"><input type="checkbox" class="form-check-input me-2"> Review sedation — minimize benzos</label>
+                {% if label == 'HIGH' %}
+                <label class="order-item order-critical"><input type="checkbox" class="form-check-input me-2"> <strong>STAT: Page attending physician</strong></label>
+                {% endif %}
+              </div>
+              {% else %}
+              <div class="text-center text-muted py-4"><i class="fa-solid fa-shield-check fs-3 d-block mb-2 text-success opacity-50"></i>Standard ICU prophylaxis<br><small>No overrides required</small></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WARD HEATMAP -->
+      <div class="card-glass">
+        <div class="card-glass-header"><span><i class="fa-solid fa-grip me-2"></i>Ward Bed Heatmap</span></div>
+        <div class="card-glass-body">
+          <div class="heatmap-grid">
+            {% set beds = ['A-01','A-02','A-03','A-04','B-01','B-02','B-03','B-04','C-01','C-02','C-03','C-04','D-01','D-02','D-03','D-04'] %}
+            {% for bed_id in beds %}
+              {% set bed_patient = namespace(found=false, label='empty', name='', risk='') %}
+              {% for p in ward_patients %}
+                {% if bed_id in p.bed %}
+                  {% set bed_patient.found = true %}
+                  {% set bed_patient.label = p.label|lower %}
+                  {% set bed_patient.name = p.name[:10] %}
+                  {% set bed_patient.risk = p.risk_pct %}
+                {% endif %}
+              {% endfor %}
+              <div class="heat-cell heat-{{ bed_patient.label }}" title="{{ bed_patient.name }} {{ bed_patient.risk }}">
+                <div class="heat-bed">{{ bed_id }}</div>
+                {% if bed_patient.found %}<div class="heat-risk">{{ bed_patient.risk }}</div>{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOAST ═══ -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+  <div id="pagerToast" class="toast align-items-center border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body fw-600"><i class="fa-solid fa-tower-broadcast me-2 text-info"></i><span id="toastMsg">Alert dispatched</span></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Data bridges -->
+<script id="shapData" type="application/json">{{ shap_json | safe }}</script>
+{% if prob is not none %}<script id="probData" type="application/json">{{ prob }}</script>{% endif %}
+
+<script src="/static/app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+{% if dispatch_status %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const t = new bootstrap.Toast(document.getElementById('pagerToast'));
+    document.getElementById('toastMsg').textContent = 'Alert dispatched to: {{ dispatch_status }}';
+    t.show();
+  });
+</script>
+{% endif %}
+</body>
+</html>
